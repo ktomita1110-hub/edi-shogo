@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="納品照合">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>EDI納品照合</title>
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<style>
+:root{
+  --bg:#f3f5f6; --panel:#fff; --fg:#1b2329; --muted:#5b6872; --line:#d6dde2;
+  --accent:#1f5e86; --accent-ink:#fff;
+  --ok:#1d7a46; --ok-bg:#e3f3e9; --ng:#b3261e; --ng-bg:#fbe7e5; --warn:#8a5a00; --warn-bg:#fdf1d8;
+  --f-sans:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  --f-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#12171b; --panel:#1b2228; --fg:#e6ebee; --muted:#93a1ab; --line:#2e3942;
+  --accent:#5aa6d6; --accent-ink:#0d1a22;
+  --ok:#6fd39a; --ok-bg:#16301f; --ng:#ff8a80; --ng-bg:#3a1a18; --warn:#f2c46b; --warn-bg:#332710; color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--f-sans);font-size:15px;line-height:1.5}
+.wrap{max-width:640px;margin:0 auto;padding:16px max(16px,env(safe-area-inset-right)) 40px max(16px,env(safe-area-inset-left));display:flex;flex-direction:column;gap:14px}
+h1{font-size:20px;margin:0}
+.sub{color:var(--muted);font-size:13px;margin:2px 0 0}
+.tally{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.t{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 2px;text-align:center}
+.t b{display:block;font-family:var(--f-mono);font-size:22px;line-height:1.2}
+.t span{font-size:11px;color:var(--muted)}
+.t.ok b{color:var(--ok)} .t.ng b{color:var(--ng)} .t.wn b{color:var(--warn)}
+.cam{display:flex;align-items:center;justify-content:center;gap:10px;font:inherit;font-weight:700;font-size:18px;padding:18px;border-radius:12px;border:0;background:var(--accent);color:var(--accent-ink);cursor:pointer;width:100%}
+.cam svg{width:26px;height:26px}
+.opt{display:flex;align-items:center;gap:8px;font-size:14px}
+.row{display:flex;gap:8px}
+input[type=text]{font:inherit;font-family:var(--f-mono);padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--fg);min-width:0;flex:1}
+.btn{font:inherit;padding:10px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer;white-space:nowrap}
+.btn.pri{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700}
+.btn.danger{color:var(--ng);border-color:var(--ng)}
+.btn:disabled{opacity:.5}
+.flash{border-radius:10px;padding:12px 14px;font-weight:700;min-height:56px;display:flex;flex-direction:column;justify-content:center}
+.flash code{font-family:var(--f-mono);font-weight:500;font-size:13px;word-break:break-all}
+.flash.ok{background:var(--ok-bg);color:var(--ok)} .flash.ng{background:var(--ng-bg);color:var(--ng)} .flash.wn{background:var(--warn-bg);color:var(--warn)}
+.flash.idle{background:var(--panel);color:var(--muted);border:1px dashed var(--line);font-weight:500}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tabs button{font:inherit;font-size:13px;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+.tabs button.on{border-color:var(--accent);color:var(--accent);font-weight:700}
+.list{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.item{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.pill{font-size:12px;font-weight:700;padding:3px 8px;border-radius:999px;white-space:nowrap}
+.pill.ok{background:var(--ok-bg);color:var(--ok)} .pill.ng{background:var(--ng-bg);color:var(--ng)} .pill.wn{background:var(--warn-bg);color:var(--warn)}
+.key{font-family:var(--f-mono);font-size:14px;word-break:break-all;min-width:0}
+.cnt{font-family:var(--f-mono);font-size:12px;color:var(--muted);white-space:nowrap}
+.empty{padding:20px;text-align:center;color:var(--muted);font-size:14px}
+.foot{display:flex;gap:8px;flex-wrap:wrap}
+.confirm{background:var(--ng-bg);color:var(--ng);border-radius:10px;padding:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.confirm span{flex:1;min-width:10em}
+.hint{font-size:12px;color:var(--muted);margin:0}
+[hidden]{display:none!important}
+/* カメラ画面 */
+#scanner{position:fixed;inset:0;background:#000;z-index:50;display:flex;flex-direction:column}
+#scanner video{flex:1;width:100%;object-fit:cover;min-height:0}
+.frame{position:absolute;left:8%;right:8%;top:32%;height:28%;border:3px solid rgba(255,255,255,.85);border-radius:10px;box-shadow:0 0 0 9999px rgba(0,0,0,.35);pointer-events:none}
+.scanbar{position:absolute;left:0;right:0;bottom:0;padding:14px max(16px,env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));display:flex;flex-direction:column;gap:10px;background:linear-gradient(transparent,rgba(0,0,0,.8))}
+.scanmsg{color:#fff;font-weight:700;text-align:center;font-size:15px;text-shadow:0 1px 3px #000;min-height:1.5em}
+.scanbar .btn{background:#fff;color:#111;border:0;font-weight:700;font-size:16px;padding:14px}
+.scantop{position:absolute;top:0;left:0;right:0;padding:calc(12px + env(safe-area-inset-top)) 16px 12px;color:#fff;text-align:center;font-size:13px;background:linear-gradient(rgba(0,0,0,.7),transparent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>EDI納品照合</h1>
+    <p class="sub">納品書と現品票のバーコードを読み、抜け・余りを確認します（福井化成EDI対応）</p>
+  </header>
+
+  <div class="tally">
+    <div class="t"><b id="nD">0</b><span>納品書</span></div>
+    <div class="t"><b id="nG">0</b><span>現品票</span></div>
+    <div class="t ok"><b id="nOk">0</b><span>一致</span></div>
+    <div class="t ng"><b id="nShort">0</b><span>現品票なし</span></div>
+    <div class="t wn"><b id="nExtra">0</b><span>納品書なし</span></div>
+  </div>
+
+  <button class="cam" id="camBtn" type="button">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
+    カメラで読み取る
+  </button>
+  <label class="opt"><input type="checkbox" id="contMode"> 読み取り後もカメラを閉じずに続けて読む</label>
+  <p class="hint">納品書・現品票は自動で見分けます。現品票は<b>下段の注文番号バーコード</b>を写してください。納品書の縦向きバーコードは、スマホを横にすると読みやすくなります。</p>
+
+  <form class="row" id="manualForm">
+    <input type="text" id="manual" placeholder="スキャナ入力・手入力" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button class="btn" type="submit">追加</button>
+  </form>
+
+  <div class="flash idle" id="flash">読み取り待ち</div>
+
+  <div class="tabs">
+    <button data-f="issue" class="on">要確認</button>
+    <button data-f="all">全件</button>
+    <button data-f="log">読取履歴</button>
+  </div>
+  <div class="list" id="list"></div>
+
+  <div class="row">
+    <input type="text" id="who" placeholder="担当者名（記録用）" style="font-family:var(--f-sans)">
+    <button class="btn pri" id="saveBtn" type="button">シートに記録</button>
+  </div>
+  <div class="foot">
+    <button class="btn" id="copyBtn" type="button">結果をコピー</button>
+    <button class="btn danger" id="resetBtn" type="button">全部クリア</button>
+  </div>
+  <details id="cfgBox">
+    <summary>記録先の設定（最初に1回）</summary>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+      <label class="hint" for="gasUrl">Apps ScriptのウェブアプリURL（…/exec で終わるもの）</label>
+      <input type="text" id="gasUrl" placeholder="https://script.google.com/macros/s/…/exec">
+      <label class="hint" for="token">合言葉（Code.gs の TOKEN と同じ文字）</label>
+      <input type="text" id="token" placeholder="合言葉">
+    </div>
+  </details>
+  <div class="confirm" id="confirmBox" hidden>
+    <span>読み取った内容をすべて消します</span>
+    <button class="btn danger" id="resetYes" type="button">消す</button>
+    <button class="btn" id="resetNo" type="button">やめる</button>
+  </div>
+</div>
+
+<div id="scanner" hidden>
+  <video id="video" playsinline muted></video>
+  <div class="frame"></div>
+  <div class="scantop">バーコードを枠に入れてください</div>
+  <div class="scanbar">
+    <div class="scanmsg" id="scanMsg"></div>
+    <button class="btn" id="closeBtn" type="button">閉じる</button>
+  </div>
+</div>
+
+<script>
+(function(){
+var LS='edi-shogo-gas-v1';
+var EDI_RE=/^([12])([0-9A-Z]{9}\d{2})$/;   // 2=納品書, 1=現品票, 続く11桁=注文番号
+var PART_RE=/\s{2,}\d{3,4}$/;               // 現品票上段の「部品番号＋C/C」
+var st={scans:[]}, filter='issue';
+try{var s=JSON.parse(localStorage.getItem(LS)); if(s&&s.scans) st=s}catch(e){}
+try{document.getElementById('who').value=localStorage.getItem(LS+'-who')||''}catch(e){}
+function $(id){return document.getElementById(id)}
+function save(){try{localStorage.setItem(LS,JSON.stringify(st))}catch(e){}}
+function classify(raw){var m=String(raw).trim().match(EDI_RE);return m?{t:m[1]==='2'?'D':'G',k:m[2]}:null}
+function fmt(k){return k.length===11?k.slice(0,9)+'-'+k.slice(9):k}
+
+function compute(){
+  var m={};
+  st.scans.forEach(function(s){var k=s.k;if(!m[k])m[k]={k:k,d:0,g:0};m[k][s.t==='D'?'d':'g']++});
+  return Object.keys(m).map(function(k){var r=m[k];r.st=r.d===r.g?'ok':(r.g<r.d?'short':'extra');return r});
+}
+var LABEL={ok:['一致','ok'],short:['現品票なし','ng'],extra:['納品書なし','wn']};
+
+function render(){
+  var rows=compute();
+  $('nD').textContent=st.scans.filter(function(s){return s.t==='D'}).length;
+  $('nG').textContent=st.scans.filter(function(s){return s.t==='G'}).length;
+  $('nOk').textContent=rows.filter(function(r){return r.st==='ok'}).length;
+  $('nShort').textContent=rows.filter(function(r){return r.st==='short'}).length;
+  $('nExtra').textContent=rows.filter(function(r){return r.st==='extra'}).length;
+  document.querySelectorAll('.tabs button').forEach(function(b){b.classList.toggle('on',b.dataset.f===filter)});
+  var L=$('list');L.textContent='';
+  if(filter==='log'){
+    if(!st.scans.length){L.innerHTML='<div class="empty">まだ読み取りがありません</div>';return}
+    st.scans.slice().reverse().forEach(function(s,i){
+      var d=el('div','item');
+      d.appendChild(el('span','pill '+(s.t==='D'?'ok':'wn'),s.t==='D'?'納品書':'現品票'));
+      d.appendChild(el('span','key',fmt(s.k)));
+      var x=el('button','btn','取消');x.type='button';
+      x.onclick=function(){st.scans.splice(st.scans.length-1-i,1);save();render()};
+      d.appendChild(x);L.appendChild(d);
+    });return;
+  }
+  var order={short:0,extra:1,ok:2};
+  var show=rows.sort(function(a,b){return order[a.st]-order[b.st]||a.k.localeCompare(b.k)});
+  if(filter==='issue')show=show.filter(function(r){return r.st!=='ok'});
+  if(!show.length){L.innerHTML='<div class="empty">'+(rows.length?'差異はありません。すべて一致しています':'納品書か現品票を読み取ってください')+'</div>';return}
+  show.forEach(function(r){
+    var d=el('div','item');
+    d.appendChild(el('span','pill '+LABEL[r.st][1],LABEL[r.st][0]));
+    d.appendChild(el('span','key',fmt(r.k)));
+    d.appendChild(el('span','cnt','納'+r.d+' / 現'+r.g));
+    L.appendChild(d);
+  });
+}
+function el(tag,cls,txt){var e=document.createElement(tag);e.className=cls;if(txt!=null)e.textContent=txt;return e}
+
+var ac;
+function beep(ok){try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();
+  var o=ac.createOscillator(),g=ac.createGain();o.frequency.value=ok?1320:330;o.type='square';
+  g.gain.value=.06;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+(ok?.08:.35))}catch(e){}
+  try{navigator.vibrate&&navigator.vibrate(ok?60:[80,60,80])}catch(e){}}
+function flash(cls,title,detail){var f=$('flash');f.className='flash '+cls;f.textContent='';
+  f.appendChild(el('span','',title));if(detail)f.appendChild(el('code','',detail))}
+
+/* 戻り値: {res, msg, cls} */
+function addScan(raw){
+  raw=String(raw).replace(/[\r\n]+$/,'').trim(); if(!raw)return null;
+  if(PART_RE.test(raw)) return {res:'part',cls:'wn',msg:'部品番号のバーコードです。下段の注文番号バーコードを読んでください',raw:raw};
+  var c=classify(raw);
+  if(!c) return {res:'unknown',cls:'ng',msg:'福井化成EDIの納品書・現品票のバーコードではありません',raw:raw};
+  if(st.scans.some(function(s){return s.t===c.t&&s.k===c.k}))
+    return {res:'dup',cls:'wn',msg:'読み取り済みです（二重読み）',raw:fmt(c.k)};
+  st.scans.push({t:c.t,k:c.k,raw:raw,at:Date.now()});save();render();
+  var other=st.scans.some(function(s){return s.t!==c.t&&s.k===c.k});
+  if(c.t==='G') return other?{res:'ok',cls:'ok',msg:'現品票：納品書と一致',raw:fmt(c.k)}:{res:'extra',cls:'wn',msg:'現品票を登録（納品書はまだ読んでいません）',raw:fmt(c.k)};
+  return {res:'ok',cls:'ok',msg:other?'納品書：現品票と一致':'納品書を登録しました',raw:fmt(c.k)};
+}
+function report(r){if(!r)return;flash(r.cls,r.msg,r.raw);beep(r.cls==='ok')}
+
+$('manualForm').addEventListener('submit',function(e){e.preventDefault();report(addScan($('manual').value));$('manual').value='';$('manual').focus()});
+document.querySelectorAll('.tabs button').forEach(function(b){b.onclick=function(){filter=b.dataset.f;render()}});
+$('resetBtn').onclick=function(){$('confirmBox').hidden=false};
+$('resetNo').onclick=function(){$('confirmBox').hidden=true};
+$('resetYes').onclick=function(){st.scans=[];save();$('confirmBox').hidden=true;flash('idle','読み取り待ち');render()};
+$('who').addEventListener('input',function(){try{localStorage.setItem(LS+'-who',$('who').value)}catch(e){}});
+
+function resultLines(){
+  var rows=compute(),out=[];
+  ['short','extra','ok'].forEach(function(s){rows.filter(function(r){return r.st===s}).forEach(function(r){out.push({k:fmt(r.k),st:LABEL[s][0],d:r.d,g:r.g})})});
+  return out;
+}
+$('copyBtn').onclick=function(){
+  var lines=['EDI納品照合 '+new Date().toLocaleString('ja-JP'),'納品書 '+$('nD').textContent+'枚 / 現品票 '+$('nG').textContent+'枚'];
+  resultLines().forEach(function(r){lines.push(r.st+'\t'+r.k+'\t納'+r.d+'\t現'+r.g)});
+  var txt=lines.join('\n');
+  (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(function(){flash('ok','結果をコピーしました')},function(){
+    var ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();
+    try{document.execCommand('copy');flash('ok','結果をコピーしました')}catch(e){flash('ng','コピーできませんでした')}ta.remove()});
+};
+$('saveBtn').onclick=function(){
+  var rows=resultLines();
+  if(!rows.length){flash('wn','記録する読み取りがありません');return}
+  var url=$('gasUrl').value.trim();
+  if(!/^https:\/\/script\.google\.com\/.+\/exec$/.test(url)){$('cfgBox').open=true;flash('wn','記録先のURLを設定してください','「記録先の設定」に …/exec で終わるURLを貼り付けます');return}
+  var b=$('saveBtn');b.disabled=true;b.textContent='記録中…';
+  function done(){b.disabled=false;b.textContent='シートに記録'}
+  fetch(url,{method:'POST',body:JSON.stringify({token:$('token').value.trim(),who:$('who').value,rows:rows})})
+    .then(function(res){return res.json()})
+    .then(function(r){done();
+      if(r.ok)flash('ok','「照合履歴」シートに '+r.count+'件 記録しました','照合ID '+r.id);
+      else flash('ng','記録できませんでした',r.error||'');})
+    .catch(function(e){done();flash('ng','記録できませんでした','URLが正しいか、アクセスできるユーザーが「全員」になっているか確認してください')});
+};
+['gasUrl','token'].forEach(function(id){
+  try{$(id).value=localStorage.getItem(LS+'-'+id)||''}catch(e){}
+  $(id).addEventListener('input',function(){try{localStorage.setItem(LS+'-'+id,$(id).value.trim())}catch(e){}});
+});
+
+/* ===== ライブカメラ読み取り ===== */
+var reader=null, lastRaw='', lastAt=0, busy=false;
+function makeReader(){
+  var Z=window.ZXing, hints=new Map();
+  hints.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.CODE_39,Z.BarcodeFormat.CODE_128,Z.BarcodeFormat.QR_CODE]);
+  hints.set(Z.DecodeHintType.TRY_HARDER,true);
+  return new Z.BrowserMultiFormatReader(hints,150);
+}
+function openScanner(){
+  if(!window.ZXing){flash('ng','読み取り部品を読み込めませんでした','通信状態を確認して、ページを開き直してください');return}
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){flash('ng','このブラウザではカメラを使えません','ChromeまたはSafariで開いてください');return}
+  try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();ac.resume&&ac.resume()}catch(e){}
+  $('scanner').hidden=false;$('scanMsg').textContent='';busy=false;
+  reader=makeReader();
+  var cons={video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080},focusMode:'continuous'}};
+  reader.decodeFromConstraints(cons,$('video'),function(result){
+    if(!result||busy)return;
+    var raw=result.getText(), now=Date.now();
+    if(raw===lastRaw&&now-lastAt<2500)return;   // 同じコードの連続検出は無視
+    lastRaw=raw;lastAt=now;
+    var r=addScan(raw);
+    if(r.res==='part'||r.res==='unknown'){       // 対象外のバーコードは閉じずに案内だけ
+      $('scanMsg').textContent=r.msg;beep(false);return;
+    }
+    report(r);
+    if($('contMode').checked){$('scanMsg').textContent=r.msg+'：'+r.raw;return}
+    busy=true;closeScanner();
+  }).catch(function(err){
+    closeScanner();
+    var n=err&&err.name;
+    if(n==='NotAllowedError')flash('ng','カメラの使用が許可されていません','ブラウザの設定でこのページのカメラを許可してください');
+    else flash('ng','カメラを起動できませんでした',String(err&&err.message||err));
+  });
+}
+function closeScanner(){
+  try{reader&&reader.reset()}catch(e){}
+  reader=null;$('scanner').hidden=true;
+}
+$('camBtn').onclick=openScanner;
+$('closeBtn').onclick=closeScanner;
+document.addEventListener('visibilitychange',function(){if(document.hidden&&reader)closeScanner()});
+
+render();
+})();
+</script>
+</body>
+</html>
